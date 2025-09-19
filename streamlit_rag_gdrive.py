@@ -1,108 +1,230 @@
+# streamlit_rag_gdrive.py
+# Streamlit app: Domain-specific RAG using MistralAI with Google Drive document ingestion
+
 import os
 import streamlit as st
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
-from sentence_transformers import SentenceTransformer
-import faiss
-import pickle
-from mistralai import Mistral
+import numpy as np
+from typing import List, Tuple
 
-# =====================
-# Google Drive Auth Helper
-# =====================
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:
+    SentenceTransformer = None
+
+try:
+    import faiss
+except Exception:
+    faiss = None
+
+try:
+    from mistralai import Mistral
+except Exception:
+    Mistral = None
+
+try:
+    from pydrive.auth import GoogleAuth
+    from pydrive.drive import GoogleDrive
+except Exception:
+    GoogleAuth = None
+    GoogleDrive = None
+
+
+# =========================
+# Google Drive Auth
+# =========================
 def authenticate_gdrive():
+    if GoogleAuth is None:
+        st.error("PyDrive not installed. Install with `pip install pydrive`.")
+        return None
+
     if not os.path.exists("client_secrets.json"):
-        st.error("⚠️ Missing `client_secrets.json` file!\n\n**Fix:**\n1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials).\n2. Create OAuth client credentials (Desktop App).\n3. Download the JSON file and rename it to `client_secrets.json`.\n4. Place it in the same folder where you run this Streamlit app.\n\nThen restart the app and try again.")
+        st.error(
+            "⚠️ Missing `client_secrets.json`.\n\n"
+            "1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)\n"
+            "2. Create OAuth Client ID → choose Desktop App.\n"
+            "3. Download JSON and rename it to `client_secrets.json`.\n"
+            "4. Place it in the same folder as this Streamlit script and restart the app."
+        )
+        return None
+
+    gauth = GoogleAuth()
+    try:
+        gauth.LoadClientConfigFile("client_secrets.json")
+    except Exception as e:
+        st.error(f"Failed to load client_secrets.json: {e}")
         return None
 
     try:
-        gauth = GoogleAuth()
-        gauth.LoadClientConfigFile("client_secrets.json")
         gauth.LocalWebserverAuth()
+    except Exception as e:
+        st.warning(f"LocalWebserverAuth failed: {e}\nFalling back to CommandLineAuth...")
+        try:
+            gauth.CommandLineAuth()
+        except Exception as e2:
+            st.error(f"Google Drive authentication failed: {e2}")
+            return None
+
+    try:
         drive = GoogleDrive(gauth)
-        st.success("✅ Google Drive authenticated successfully.")
+        st.success("✅ Google Drive authentication successful!")
         return drive
     except Exception as e:
         st.error(f"Google Drive authentication failed: {e}")
         return None
 
-# =====================
+
+# =========================
 # Document Fetching
-# =====================
-def fetch_drive_docs(drive, folder_id, min_docs=4):
-    file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
-    if len(file_list) < min_docs:
-        st.error(f"Found only {len(file_list)} documents. Please ensure there are at least {min_docs} in the folder.")
+# =========================
+def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, str]]:
+    try:
+        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
+    except Exception as e:
+        st.error(f"Failed to list files: {e}")
         return []
 
     docs = []
-    for file in file_list:
-        if file['mimeType'] == 'application/vnd.google-apps.document':
-            content = file.GetContentString()
-            docs.append({"title": file['title'], "content": content})
+    for f in file_list[:max_files]:
+        if f['mimeType'] == 'text/plain':
+            try:
+                content = f.GetContentString()
+                docs.append((f['title'], content))
+            except Exception as e:
+                st.warning(f"Could not read {f['title']}: {e}")
     return docs
 
-# =====================
-# Embedding + FAISS Index
-# =====================
-def build_faiss_index(docs):
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    texts = [doc['content'] for doc in docs]
-    embeddings = model.encode(texts)
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(embeddings)
-    return index, model, docs
 
-# =====================
-# Mistral Query
-# =====================
-def query_mistral(index, model, docs, user_query, mistral_api_key):
-    query_embedding = model.encode([user_query])
-    D, I = index.search(query_embedding, k=3)
-    retrieved_docs = [docs[i]['content'] for i in I[0]]
+# =========================
+# Embedding + FAISS
+# =========================
+def chunk_text(text, chunk_size=400, overlap=50):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start = max(end - overlap, end)
+    return chunks
 
-    context = "\n\n".join(retrieved_docs)
-    prompt = f"Answer the question using the context below.\n\nContext:\n{context}\n\nQuestion: {user_query}\nAnswer:"
 
-    client = Mistral(api_key=mistral_api_key)
-    resp = client.chat.complete(
-        model="mistral-tiny",
-        messages=[{"role": "user", "content": prompt}]
+def compute_embeddings_sbert(texts, model_name="all-MiniLM-L6-v2"):
+    if SentenceTransformer is None:
+        raise RuntimeError("Install sentence-transformers to compute embeddings.")
+    model = SentenceTransformer(model_name)
+    embs = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+    return embs.astype(np.float32)
+
+
+def build_faiss_index(embs):
+    if faiss is None:
+        raise RuntimeError("Install faiss-cpu to use vector store.")
+    d = embs.shape[1]
+    index = faiss.IndexFlatL2(d)
+    index.add(embs)
+    return index
+
+
+def query_index(index, q_emb, top_k=4):
+    distances, indices = index.search(q_emb, top_k)
+    return distances, indices
+
+
+def call_mistral(api_key, prompt, model="mistral-medium"):
+    if Mistral is None:
+        raise RuntimeError("Install mistralai to use Mistral API.")
+    client = Mistral(api_key=api_key)
+    response = client.chat.complete(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that answers using provided sources. If the answer is not present, say you don't know."},
+            {"role": "user", "content": prompt}
+        ]
     )
-    return resp.choices[0].message['content'], retrieved_docs
+    return response.choices[0].message['content']
 
-# =====================
+
+# =========================
 # Streamlit UI
-# =====================
-st.title("📂 Domain-Specific RAG - Google Drive + MistralAI")
+# =========================
+st.set_page_config(page_title="Domain-specific RAG (GDrive + Mistral)", layout="wide")
+st.title("📂 Domain-specific RAG — Google Drive + MistralAI")
 
-st.sidebar.header("🔑 Setup")
-folder_id = st.sidebar.text_input("Google Drive Folder ID")
-mistral_api_key = st.sidebar.text_input("Mistral API Key", type="password")
+with st.sidebar:
+    st.header("Configuration")
+    MISTRAL_KEY = st.text_input("Mistral API Key", type="password")
+    top_k = st.number_input("Top-k retrieved chunks", min_value=1, max_value=10, value=4)
+    chunk_size = st.number_input("Chunk size", min_value=200, max_value=2000, value=600)
+    overlap = st.number_input("Chunk overlap", min_value=0, max_value=400, value=100)
+    folder_id = st.text_input("Google Drive Folder ID")
+    gdrive_fetch = st.button("Fetch Documents from Google Drive")
 
-if st.sidebar.button("Fetch & Build Index"):
+if gdrive_fetch:
     drive = authenticate_gdrive()
     if drive:
-        docs = fetch_drive_docs(drive, folder_id)
-        if docs:
-            index, model, stored_docs = build_faiss_index(docs)
-            with open("faiss_index.pkl", "wb") as f:
-                pickle.dump((index, model, stored_docs), f)
-            st.success(f"✅ Indexed {len(docs)} documents successfully!")
-
-if os.path.exists("faiss_index.pkl"):
-    with open("faiss_index.pkl", "rb") as f:
-        index, model, stored_docs = pickle.load(f)
-
-    user_query = st.text_input("Ask a question about the documents:")
-    if st.button("Run Query"):
-        if not mistral_api_key:
-            st.error("Please provide your Mistral API Key in the sidebar.")
+        raw_docs = fetch_gdrive_files(drive, folder_id)
+        if len(raw_docs) < 4:
+            st.error("Less than 4 documents found. Add more files to the folder.")
         else:
-            answer, context_docs = query_mistral(index, model, stored_docs, user_query, mistral_api_key)
-            st.markdown("### 🔍 Retrieved Context")
-            for i, doc in enumerate(context_docs):
-                st.markdown(f"**Doc {i+1}:** {doc[:300]}...")
-            st.markdown("### 🤖 Answer")
-            st.success(answer)
+            st.success(f"Fetched {len(raw_docs)} documents from Google Drive.")
+            st.session_state['raw_docs'] = raw_docs
+
+if st.button("Ingest and Build Index"):
+    if 'raw_docs' not in st.session_state or len(st.session_state['raw_docs']) < 4:
+        st.error("Please fetch at least 4 documents first.")
+    else:
+        raw_docs = st.session_state['raw_docs']
+        chunks = []
+        metadata = []
+        for doc_id, text in raw_docs:
+            for i, c in enumerate(chunk_text(text, chunk_size, overlap)):
+                chunks.append(c)
+                metadata.append({"source": doc_id, "chunk": i})
+        st.session_state['chunks'] = chunks
+        st.session_state['metadata'] = metadata
+
+        try:
+            embs = compute_embeddings_sbert(chunks)
+            st.session_state['embs'] = embs
+            index = build_faiss_index(embs)
+            st.session_state['index'] = index
+            st.success(f"✅ Built FAISS index with {len(chunks)} chunks.")
+        except Exception as e:
+            st.error(f"Embedding/Indexing error: {e}")
+
+st.header("🔎 Query")
+query = st.text_input("Enter your question")
+
+if st.button("Run Query"):
+    if 'index' not in st.session_state:
+        st.error("No index found. Fetch and ingest documents first.")
+    elif not query:
+        st.error("Please enter a query.")
+    else:
+        q_emb = compute_embeddings_sbert([query])
+        distances, indices = query_index(st.session_state['index'], q_emb, top_k)
+        chunks = st.session_state['chunks']
+        metadata = st.session_state['metadata']
+        context_texts = []
+        for rank, hit in enumerate(indices[0]):
+            snippet = chunks[hit]
+            context_texts.append(f"Source: {metadata[hit]['source']} — {snippet}")
+            st.markdown(f"**Rank {rank+1} — Source:** {metadata[hit]['source']} (chunk {metadata[hit]['chunk']})")
+            st.code(snippet[:800])
+
+        prompt = "Use these sources to answer the question. Cite source numbers.\n\n"
+        for i, ctx in enumerate(context_texts):
+            prompt += f"[{i+1}] {ctx}\n\n"
+        prompt += f"User Question: {query}\nAnswer:"
+
+        if MISTRAL_KEY:
+            try:
+                with st.spinner("Calling MistralAI..."):
+                    answer = call_mistral(MISTRAL_KEY, prompt)
+                st.subheader("Answer")
+                st.write(answer)
+            except Exception as e:
+                st.error(f"Mistral API error: {e}")
+        else:
+            st.warning("No Mistral API key provided — showing retrieved context only.")
+            st.subheader("Retrieved Context")
+            st.write("\n\n".join(context_texts))
