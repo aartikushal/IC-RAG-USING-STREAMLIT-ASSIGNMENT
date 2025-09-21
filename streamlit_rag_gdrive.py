@@ -55,16 +55,6 @@ def authenticate_gdrive():
         return None
 
     try:
-        gauth.LocalWebserverAuth()
-    except Exception as e:
-        st.warning(f"LocalWebserverAuth failed: {e}\nFalling back to CommandLineAuth...")
-        try:
-            gauth.CommandLineAuth()
-        except Exception as e2:
-            st.error(f"Google Drive authentication failed: {e2}")
-            return None
-
-    try:
         drive = GoogleDrive(gauth)
         st.success("✅ Google Drive authentication successful!")
         return drive
@@ -228,3 +218,4 @@ if st.button("Run Query"):
             st.warning("No Mistral API key provided — showing retrieved context only.")
             st.subheader("Retrieved Context")
             st.write("\n\n".join(context_texts))
+
