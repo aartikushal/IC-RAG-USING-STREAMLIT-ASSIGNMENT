@@ -4,6 +4,7 @@
 import os
 import streamlit as st
 import numpy as np
+pip install sentence-transformers faiss-cpu pydrive mistralai
 from typing import List, Tuple
 
 try:
@@ -218,4 +219,5 @@ if st.button("Run Query"):
             st.warning("No Mistral API key provided — showing retrieved context only.")
             st.subheader("Retrieved Context")
             st.write("\n\n".join(context_texts))
+
 
