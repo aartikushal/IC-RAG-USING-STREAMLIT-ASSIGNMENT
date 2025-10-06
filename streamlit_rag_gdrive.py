@@ -76,18 +76,18 @@ def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, s
 
     docs = []
     for f in file_list[:max_files]:
-    try:
-        if f['mimeType'] == 'text/plain':  # TXT files
-            content = f.GetContentString()
-        elif f['mimeType'] == 'application/pdf':  # PDFs
-            content = f.GetContentString('application/pdf')
-        elif f['mimeType'] == 'application/vnd.google-apps.document':  # Google Docs
-            content = f.GetContentString('text/plain')
+      try:
+        if f['mimeType'] == 'text/plain':
+          content = f.GetContentString()
+        elif f['mimeType'] == 'application/pdf':
+          content = f.GetContentString('application/pdf')
+        elif f['mimeType'] == 'application/vnd.google-apps.document':
+          content = f.GetContentString('text/plain')
         else:
-            continue  # Skip unsupported formats
+          continue  # Skip unsupported formats
 
-        docs.append((f['title'], content))
-    except Exception as e:
+          docs.append((f['title'], content))
+      except Exception as e:
         st.warning(f"Could not read {f['title']}: {e}")
     return docs
 
@@ -226,7 +226,3 @@ if st.button("Run Query"):
             st.warning("No Mistral API key provided — showing retrieved context only.")
             st.subheader("Retrieved Context")
             st.write("\n\n".join(context_texts))
-
-
-
-
