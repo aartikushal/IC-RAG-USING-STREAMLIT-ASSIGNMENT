@@ -57,6 +57,7 @@ def authenticate_gdrive():
 
     try:
         drive = GoogleDrive(gauth)
+        gauth.LocalWebserverAuth()
         st.success("✅ Google Drive authentication successful!")
         return drive
     except Exception as e:
@@ -85,7 +86,8 @@ def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, s
           content = f.GetContentString('text/plain')
         else:
           continue  # Skip unsupported formats
-        docs.append((f['title'], content))          
+        docs.append((f['title'], content))
+      st.write([(f['title'], f['mimeType']) for f in file_list])      
       except Exception as e:
         st.warning(f"Could not read {f['title']}: {e}")
     return docs
@@ -137,7 +139,8 @@ def call_mistral(api_key, prompt, model="mistral-medium"):
             {"role": "user", "content": prompt}
         ]
     )
-    return response.choices[0].message['content']
+    return response.choices[0].message.content
+    #return response.choices[0].message['content']
 
 
 # =========================
@@ -173,6 +176,7 @@ if st.button("Ingest and Build Index"):
         chunks = []
         metadata = []
         for doc_id, text in raw_docs:
+          chunks = [c for c in chunks if len(c.strip()) > 30]
             for i, c in enumerate(chunk_text(text, chunk_size, overlap)):
                 chunks.append(c)
                 metadata.append({"source": doc_id, "chunk": i})
