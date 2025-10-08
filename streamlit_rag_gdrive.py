@@ -87,7 +87,7 @@ def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, s
         else:
           continue  # Skip unsupported formats
         docs.append((f['title'], content))
-      st.write([(f['title'], f['mimeType']) for f in file_list])      
+      #st.write([(f['title'], f['mimeType']) for f in file_list])      
       except Exception as e:
         st.warning(f"Could not read {f['title']}: {e}")
     return docs
