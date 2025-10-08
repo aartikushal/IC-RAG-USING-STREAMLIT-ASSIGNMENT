@@ -85,8 +85,7 @@ def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, s
           content = f.GetContentString('text/plain')
         else:
           continue  # Skip unsupported formats
-
-          docs.append((f['title'], content))
+        docs.append((f['title'], content))          
       except Exception as e:
         st.warning(f"Could not read {f['title']}: {e}")
     return docs
