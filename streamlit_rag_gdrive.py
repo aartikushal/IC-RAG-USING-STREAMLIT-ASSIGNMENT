@@ -87,7 +87,7 @@ def fetch_gdrive_files(drive, folder_id: str, max_files=10) -> List[Tuple[str, s
         else:
           continue  # Skip unsupported formats
         docs.append((f['title'], content))
-      #st.write([(f['title'], f['mimeType']) for f in file_list])      
+      st.write([(f['title'], f['mimeType']) for f in file_list])      
       except Exception as e:
         st.warning(f"Could not read {f['title']}: {e}")
     return docs
@@ -176,10 +176,11 @@ if st.button("Ingest and Build Index"):
         chunks = []
         metadata = []
         for doc_id, text in raw_docs:
-          chunks = [c for c in chunks if len(c.strip()) > 30]
+          #chunks = [c for c in chunks if len(c.strip()) > 30]
             for i, c in enumerate(chunk_text(text, chunk_size, overlap)):
-                chunks.append(c)
-                metadata.append({"source": doc_id, "chunk": i})
+              chunks = [c for c in chunks if len(c.strip()) > 30]
+              chunks.append(c)
+              metadata.append({"source": doc_id, "chunk": i})
         st.session_state['chunks'] = chunks
         st.session_state['metadata'] = metadata
 
