@@ -49,12 +49,12 @@ def authenticate_gdrive():
         return None
 
     gauth = GoogleAuth()
-    try:
-        gauth.LoadClientConfigFile("client_secrets.json")
-        gauth.LocalWebserverAuth()
-    except Exception as e:
-        st.error(f"Failed to load client_secrets.json: {e}")
-        return None
+    #try:
+     #   gauth.LoadClientConfigFile("client_secrets.json")
+      #  gauth.LocalWebserverAuth()
+    #except Exception as e:
+     #   st.error(f"Failed to load client_secrets.json: {e}")
+      #  return None
 
     try:
         gauth.LoadClientConfigFile("client_secrets.json")
