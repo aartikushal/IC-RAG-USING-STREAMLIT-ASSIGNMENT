@@ -51,13 +51,15 @@ def authenticate_gdrive():
     gauth = GoogleAuth()
     try:
         gauth.LoadClientConfigFile("client_secrets.json")
+        gauth.LocalWebserverAuth()
     except Exception as e:
         st.error(f"Failed to load client_secrets.json: {e}")
         return None
 
     try:
-        drive = GoogleDrive(gauth)
+        gauth.LoadClientConfigFile("client_secrets.json")
         gauth.LocalWebserverAuth()
+        drive = GoogleDrive(gauth)
         st.success("✅ Google Drive authentication successful!")
         return drive
     except Exception as e:
@@ -178,9 +180,10 @@ if st.button("Ingest and Build Index"):
         for doc_id, text in raw_docs:
           #chunks = [c for c in chunks if len(c.strip()) > 30]
             for i, c in enumerate(chunk_text(text, chunk_size, overlap)):
-              chunks = [c for c in chunks if len(c.strip()) > 30]
+              #chunks = [c for c in chunks if len(c.strip()) > 30]
               chunks.append(c)
               metadata.append({"source": doc_id, "chunk": i})
+        chunks = [c for c in chunks if len(c.strip()) > 30]
         st.session_state['chunks'] = chunks
         st.session_state['metadata'] = metadata
 
